@@ -3,13 +3,43 @@ import sys
 import argparse
 def simple_node_distance(t, nid, pnid):
     td = 0
-    for anc in t.rsearch(nid,True):
-        if anc.id == pnid:
+    ancestryList = []
+    
+    par = t.get_node(nid)
+    par = par.parent.id
+    while par != t.root.id:
+        ancestryList.append(par)
+        par = t.get_node(par)
+        par = par.parent.id
+    ancestryList.append(par)  #adds root
+
+    for anc in ancestryList:
+        if anc == pnid:
             return td
+        anc = t.get_node(anc)
         td += len(anc.mutations)
     return td
+    # for anc in t.rsearch(nid,True):
+    #     if anc.id == pnid:
+    #         return td
+    #     td += len(anc.mutations)
+    # return td
 
-def evaluate_candidate(t, a, nid, pgp_d, ignore = set()):
+def dists_to_root(tree, nid, nodes):
+    #nodes must be a dict that gets updated on each recursion
+    #gives back a dict with all nodes and their respective dist from root
+    if nid.id == tree.root.id:
+        nodes[nid.id] = 0   #becomes 0 because it is the root
+    for child in nid.children:
+        if (nid.id == tree.root.id):
+            dist = len(child.mutations)
+        else:
+            dist = nodes[child.parent.id] + len(child.mutations)    
+        nodes[child.id] = dist
+        dists_to_root(tree, child, nodes)
+    return nodes
+
+def evaluate_candidate(t, a, nid, pgp_d, dist_to_the_root, ignore = set()):
     """Evaluate a candidate branch as a putative sublineage.
 
     Args:
@@ -17,19 +47,30 @@ def evaluate_candidate(t, a, nid, pgp_d, ignore = set()):
         a (str): The parent lineage annotation node.
         nid (str): The node id of the candidate branch.
     """
-    leaves = [l for l in t.get_leaves(nid) if l.id not in ignore]
+    # leaves = [l for l in t.get_leaves(nid) if l.id not in ignore]
+
+    leavesList = t.get_leaves(nid)
+    leavesSet = set(leavesList)
+    leaves = list(leavesSet.difference(ignore))  # not sure if this is working correctly to eliminate mutual keys
+
     if len(leaves) == 0:
         return 0
-    candidate_to_parent = simple_node_distance(t, nid, a)
+    # candidate_to_parent = simple_node_distance(t, nid, a)
+    candidate_to_parent = dist_to_the_root[nid] - dist_to_the_root[a] 
     if candidate_to_parent == 0:
         return 0
     total_distances = 0
     for l in leaves:
-        dist = simple_node_distance(t, l.id, nid)
+        # dist = simple_node_distance(t, l.id, nid)
+        if (type(l) == str):   #handles case of leaf information just being an id and nothing else
+            dist = dist_to_the_root[l] - dist_to_the_root[nid]
+        else:
+            dist = dist_to_the_root[l.id] - dist_to_the_root[nid]
         total_distances += dist
     if total_distances == 0:
         return 0
     mean_distances = total_distances/len(leaves)
+    # print("mean distance: ", mean_distances, " candidate to parent: ", candidate_to_parent) #candidate_value error with mean_distance = 1 and candidate_to_parent= -1
     candidate_value = len(leaves) * (candidate_to_parent / (mean_distances + candidate_to_parent))
     mean_distances_parent = (candidate_to_parent*len(leaves) + total_distances)/len(leaves)
     parent_value = len(leaves) * (pgp_d / (mean_distances_parent + pgp_d))
@@ -46,7 +87,7 @@ def get_plin_distance(t,nid):
             continue
     return td
 
-def evaluate_lineage(t, anid, ignore = set(), floor = 0, maxpath = 100):
+def evaluate_lineage(t, anid, candidates, dist_to_the_root, ignore = set(), floor = 0, maxpath = 100):
     """Evaluate every descendent branch of lineage a to propose new sublineages.
 
     Args:
@@ -54,11 +95,12 @@ def evaluate_lineage(t, anid, ignore = set(), floor = 0, maxpath = 100):
         a (str): The lineage annotation node to check.
     """
     parent_to_grandparent = min(get_plin_distance(t,anid), maxpath)
-    candidates = t.depth_first_expansion(anid)
+    # candidates = t.depth_first_expansion(anid)
+
     good_candidates = []
     for c in candidates:
         if not c.is_leaf():
-            cscore = evaluate_candidate(t, anid, c.id, parent_to_grandparent, ignore) - floor
+            cscore = evaluate_candidate(t, anid, c.id, parent_to_grandparent, dist_to_the_root, ignore) - floor
             if cscore > 0:
                 good_candidates.append((cscore,c))
     if len(good_candidates) == 0:
@@ -94,6 +136,11 @@ def main():
     if args.dump != None:
         print("parent\tparent_nid\tproposed_sublineage\tproposed_sublineage_nid\tproposed_sublineage_score",file=dumpf)
     outer_annotes = annotes
+
+    #call reverse BFS and save to dict
+    rbfs = t.breadth_first_expansion(t.root.id, True)
+    dist_root = dists_to_root(t, t.root, {})
+
     while True:
         new_annotes = {}
         for ann,nid in outer_annotes.items():
@@ -102,7 +149,7 @@ def main():
             serial = 0
             labeled = set()
             while True:
-                best_score, best_node = evaluate_lineage(t, nid, ignore = labeled, floor = args.floor, maxpath = args.maxpath)
+                best_score, best_node = evaluate_lineage(t, nid, rbfs, dist_root, ignore = labeled, floor = args.floor, maxpath = args.maxpath)
                 if best_score <= 0:
                     break
                 new_annotes[ann + "." + str(serial)] = best_node.id
