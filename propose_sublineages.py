@@ -25,21 +25,50 @@ def simple_node_distance(t, nid, pnid):
     #     td += len(anc.mutations)
     # return td
 
-def dists_to_root(tree, nid, nodes):
+def dists_to_root(tree, node):
     #nodes must be a dict that gets updated on each recursion
     #gives back a dict with all nodes and their respective dist from root
-    if nid.id == tree.root.id:
-        nodes[nid.id] = 0   #becomes 0 because it is the root
-    for child in nid.children:
-        if (nid.id == tree.root.id):
-            dist = len(child.mutations)
-        else:
-            dist = nodes[child.parent.id] + len(child.mutations)    
-        nodes[child.id] = dist
-        dists_to_root(tree, child, nodes)
+    nodes = {}
+    def recursive_dists_to_roots(node):
+        if node.id == tree.root.id:
+            nodes[node.id] = 0   #becomes 0 because it is the root
+        for child in node.children:
+            if (node.id == tree.root.id):
+                dist = len(child.mutations)
+            else:
+                dist = nodes[node.id] + len(child.mutations)    
+            nodes[child.id] = dist
+            recursive_dists_to_roots(child)
+    recursive_dists_to_roots(node)
     return nodes
 
-def evaluate_candidate(t, a, nid, pgp_d, dist_to_the_root, ignore = set()):
+def get_sum_and_count(rbfs):
+    # node sum stored in first index and node count stored in second index of each dict entry
+    sum_and_count_dict = {}
+    leaf_count = 0
+    # leaves = {}
+    for node in rbfs:
+        if node.is_leaf():
+            sum_and_count_dict[node.id] = (len(node.mutations), 1)
+            leaf_count += 1
+        else:
+            total_count = 0
+            # total_sum = 0
+            # leaves[node.id] = []
+            for child in node.children:
+                # total_sum += sum_and_count_dict[child.id][0]
+                total_count += sum_and_count_dict[child.id][1]
+                # if child.is_leaf():
+                #     leaves[node.id].append(child.id)
+                # else:
+                #     leaves[node.id].extend(leaves[child.id])
+            sum_and_count_dict[node.id] = (len(node.mutations), total_count)
+
+    return sum_and_count_dict, leaf_count #, leaves
+
+
+
+def evaluate_candidate(t, a, nid, pgp_d, sum_and_counts, dist_to_root, ignore = set()):
     """Evaluate a candidate branch as a putative sublineage.
 
     Args:
@@ -48,32 +77,52 @@ def evaluate_candidate(t, a, nid, pgp_d, dist_to_the_root, ignore = set()):
         nid (str): The node id of the candidate branch.
     """
     # leaves = [l for l in t.get_leaves(nid) if l.id not in ignore]
+    # leaves = t.get_leaves(nid)
+    # leavesSet = set(leavesList)
+    # leaves = list(leavesSet.difference(ignore))  # not sure if this is working correctly to eliminate mutual keys
+    # sum_and_counts[nid]
+    # if len(leaves) == 0:
+    #     return 0
+    # # candidate_to_parent = simple_node_distance(t, nid, a)
+    # candidate_to_parent = dist_to_the_root[nid] - dist_to_the_root[a] 
+    # if candidate_to_parent == 0:
+    #     return 0
+    # total_distances = 0
+    # for l in leaves:
+    #     if l not in ignore:
+    #         # dist = simple_node_distance(t, l.id, nid)
+    #         try:
+    #             # print("Leaf :", l)
+    #         # print("")
+    #         # if (type(l) == str):   #handles case of leaf information just being an id and nothing else
+    #         #     dist = dist_to_the_root[l] - dist_to_the_root[nid]
+    #         # else:
+    #             dist = dist_to_the_root[l.id] - dist_to_the_root[nid]
+    #         except:
+    #             print(l)
+    #             exit(1)
+    #         total_distances += dist
+    # if total_distances == 0:
+    #     return 0
 
-    leavesList = t.get_leaves(nid)
-    leavesSet = set(leavesList)
-    leaves = list(leavesSet.difference(ignore))  # not sure if this is working correctly to eliminate mutual keys
-
-    if len(leaves) == 0:
-        return 0
-    # candidate_to_parent = simple_node_distance(t, nid, a)
-    candidate_to_parent = dist_to_the_root[nid] - dist_to_the_root[a] 
-    if candidate_to_parent == 0:
-        return 0
-    total_distances = 0
-    for l in leaves:
-        # dist = simple_node_distance(t, l.id, nid)
-        if (type(l) == str):   #handles case of leaf information just being an id and nothing else
-            dist = dist_to_the_root[l] - dist_to_the_root[nid]
-        else:
-            dist = dist_to_the_root[l.id] - dist_to_the_root[nid]
-        total_distances += dist
-    if total_distances == 0:
-        return 0
-    mean_distances = total_distances/len(leaves)
+    node_sum, node_count = sum_and_counts[nid]
+    # candidate_to_parent = node_sum - sum_and_counts[a][0]      #node's sum - parent's sum
+    candidate_to_parent = dist_to_root[nid] - dist_to_root[a] 
+    # mean_distances = total_distances/len(leaves)
+    mean_distances = node_sum/node_count
     # print("mean distance: ", mean_distances, " candidate to parent: ", candidate_to_parent) #candidate_value error with mean_distance = 1 and candidate_to_parent= -1
-    candidate_value = len(leaves) * (candidate_to_parent / (mean_distances + candidate_to_parent))
-    mean_distances_parent = (candidate_to_parent*len(leaves) + total_distances)/len(leaves)
-    parent_value = len(leaves) * (pgp_d / (mean_distances_parent + pgp_d))
+    # candidate_value = len(leaves) * (candidate_to_parent / (mean_distances + candidate_to_parent))
+    if (mean_distances == 0) and (candidate_to_parent == 0):   #avoid divide by 0
+        candidate_value = 0
+    else:
+        candidate_value = node_count * (candidate_to_parent / (mean_distances + candidate_to_parent))
+    # mean_distances_parent = (candidate_to_parent*len(leaves) + total_distances)/len(leaves)
+    mean_distances_parent = (candidate_to_parent*node_count + node_sum)/node_count
+    # parent_value = len(leaves) * (pgp_d / (mean_distances_parent + pgp_d))
+    if (mean_distances_parent == 0) and (pgp_d == 0):   #avoid divide by 0
+        parent_value = 0
+    else:
+        parent_value = node_count * (pgp_d / (mean_distances_parent + pgp_d))
     return candidate_value - parent_value
 
 def get_plin_distance(t,nid):
@@ -87,7 +136,7 @@ def get_plin_distance(t,nid):
             continue
     return td
 
-def evaluate_lineage(t, anid, candidates, dist_to_the_root, ignore = set(), floor = 0, maxpath = 100):
+def evaluate_lineage(t, dist_to_root, anid, candidates, sum_and_count, ignore = set(), floor = 0, maxpath = 100):
     """Evaluate every descendent branch of lineage a to propose new sublineages.
 
     Args:
@@ -100,7 +149,7 @@ def evaluate_lineage(t, anid, candidates, dist_to_the_root, ignore = set(), floo
     good_candidates = []
     for c in candidates:
         if not c.is_leaf():
-            cscore = evaluate_candidate(t, anid, c.id, parent_to_grandparent, dist_to_the_root, ignore) - floor
+            cscore = evaluate_candidate(t, anid, c.id, parent_to_grandparent, sum_and_count, dist_to_root, ignore) - floor
             if cscore > 0:
                 good_candidates.append((cscore,c))
     if len(good_candidates) == 0:
@@ -138,26 +187,34 @@ def main():
     outer_annotes = annotes
 
     #call reverse BFS and save to dict
+    # print("HELLO")
     rbfs = t.breadth_first_expansion(t.root.id, True)
-    dist_root = dists_to_root(t, t.root, {})
-
+    dist_root = dists_to_root(t, t.root)
+    scdict, leaf_count = get_sum_and_count(rbfs)
+    # print("Leaf_count: ", leaf_count)
     while True:
         new_annotes = {}
         for ann,nid in outer_annotes.items():
-            all_leaves = t.get_leaves_ids(nid)
-            print("Considering descendents of node {} with annotation {}, with {} total leaves.".format(nid,ann,len(all_leaves)),file=sys.stderr)
+            # all_leaves = t.get_leaves_ids(nid)
+            # print("Considering descendents of node {} with annotation {}, with {} total leaves.".format(nid,ann,len(all_leaves)),file=sys.stderr)
             serial = 0
             labeled = set()
             while True:
-                best_score, best_node = evaluate_lineage(t, nid, rbfs, dist_root, ignore = labeled, floor = args.floor, maxpath = args.maxpath)
+                best_score, best_node = evaluate_lineage(t, dist_root, nid, rbfs, scdict, ignore = labeled, floor = args.floor, maxpath = args.maxpath)
                 if best_score <= 0:
                     break
                 new_annotes[ann + "." + str(serial)] = best_node.id
                 if args.dump != None:
                     print("{}\t{}\t{}\t{}\t{}".format(ann,nid,ann + "." + str(serial),best_node.id,str(best_score+args.floor)),file=dumpf)
-                for l in t.get_leaves_ids(best_node.id):
+
+                for l in t.get_leaves_ids(best_node.id):   # change this
                     labeled.add(l)
-                if len(labeled) >= len(all_leaves):
+
+                # for leaf in leaves[best_node.id]:
+                #     labeled.add(leaf)
+
+                
+                if len(labeled) >= leaf_count:   #len(all_leaves):
                     break
                 serial += 1
                 print(serial)
