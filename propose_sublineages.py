@@ -1,7 +1,7 @@
 import bte
 import sys
 import argparse
-
+import time
 def process_mstr(mstr):
     """Read a mutation string and return the chromosome, location, reference, and alternate alleles.
     """
@@ -82,35 +82,23 @@ def get_sum_and_count2(t, rbfs,  sum_and_count_dict, ignore = set(), best_node =
     for node in rbfs:
         if (best_node != None) and (node.id == best_node.id):  # must subtract from all ancestors and 0 out all descendants.
             if node.id in sum_and_count_dict:
-            # if node.id in sum_and_count_dict:
-            #     print("node in sc dict: ", node)
                 for n in t.rsearch(node.id):
                     newsum = 0
                     newcount = 0
-                    # print("N ID: ", n.id, " NODE ID: ", node.id)
                     if n.id in sum_and_count_dict:
                         newsum = sum_and_count_dict[n.id][0] - sum_and_count_dict[node.id][0]    # sum
                         newcount = sum_and_count_dict[n.id][1] - sum_and_count_dict[node.id][1]    # count
                         sum_and_count_dict[n.id] = (newsum, newcount)
-
                 # can delete specific node and all descendants
-                del sum_and_count_dict[node.id]
-
-            # sum_and_count_dict[node.id][0] = 0  #?
-            # sum_and_count_dict[node.id][1] = 0
-            # if node
+                sum_and_count_dict.pop(node.id)
                 descendants = t.breadth_first_expansion(node.id, True)  #grab all nodes that are a descendant of the indicated node
                 for child in descendants:
-                    if child.id in sum_and_count_dict:
-                    # sum_and_count_dict[child.id][0] = 0 
-                    # sum_and_count_dict[child.id][1] = 0 
-                        del sum_and_count_dict[child.id]
-            
+                    if child.id in sum_and_count_dict: # and (child.is_leaf()):
+                        # if child.id_leaf():  #may not be correct, for testing
+                        ignore.add(child.id)
+                        sum_and_count_dict.pop(child.id)
             #can essentially delete all descendants and the specific node itself since its already part of a lineage and has been used
-
             #at this point, we will be up in the rbfs list therefore the descendants will stay at 0 until next time running?
-
-
         else:
             if node.is_leaf():
                 leaf_count += 1
@@ -252,12 +240,12 @@ def main():
     mutweights = {}
     if args.mutweights != None:
         mutweights = parse_mutweights(args.mutweights)
-    # assert len(mutweights) > 0
     if args.dump != None:
         dumpf = open(args.dump,'w+')
     if args.clear:
         t.apply_annotations({node.id:[] for node in t.depth_first_expansion()})
     annotes = t.dump_annotations()
+    original_annotations = set(annotes.keys())
     if len(annotes) == 0:
         print("No lineages found in tree; starting from root.")
         annotes = {'L':t.root.id}
@@ -272,7 +260,6 @@ def main():
     outer_annotes = annotes
 
     #call reverse BFS and save to dict
-    # print("HELLO")
     # rbfs = t.breadth_first_expansion(t.root.id, True)
     # dist_root = dists_to_root(t, t.root)
     # scdict, leaf_count = get_sum_and_count(rbfs)
@@ -287,10 +274,12 @@ def main():
             rbfs = t.breadth_first_expansion(nid, True) #takes the name
             dist_root = dists_to_root(t, t.get_node(nid)) #needs the node object, not just the name
             while True:
-                # get_sum_and_count is the original that creates a new scdict every time. get_sum_and_count2 attempts to use dynamic programming to edit scdict in place
-
+                
+                # time1 = time.time()
                 # scdict, leaf_count = get_sum_and_count(rbfs, ignore = labeled, mutweights = mutweights)
                 scdict, leaf_count = get_sum_and_count2(t, rbfs, scdict, ignore = labeled, best_node = best_node)
+                # time2 = time.time()
+                # print("TIME ELAPSED BETWEEN sum_and_count call: ", time2 - time1)
                 best_score, best_node = evaluate_lineage(t, dist_root, nid, rbfs, scdict, floor = args.floor, maxpath = args.maxpath, mutweights = mutweights)
                 if best_score <= 0:
                     break
@@ -325,14 +314,24 @@ def main():
             for n in t.rsearch(lid,True):
                 try:
                     if len(n.annotations) > 0:
-                        labels[lid] = n.annotations[0]
-                        break
+                        if n.annotations[1] != "":
+                            labels[lid] = n.annotations[1]
+                            break
+                        elif n.annotations[0] != "":
+                            labels[lid] = n.annotations[0]
+                            break
                 except IndexError:
                     continue
         with open(args.labels,'w+') as f:
-            print("sample\tlineage",file=f)
+            print("strain\tlineage",file=f)
             for k,v in labels.items():
-                print("{}\t{}".format(k,v),file=f)
+                if v not in original_annotations:
+                    print("{}\t{}".format(k,v+"_proposed"),file=f)
+                else:
+                    print("{}\t{}".format(k,v),file=f)
 
 if __name__ == "__main__":
+    # time1 = time.time()
     main()
+    # time2 = time.time()
+    # print("TIME ELAPSED: ", time2-time1)
