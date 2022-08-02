@@ -1,3 +1,4 @@
+from numpy import empty
 import bte
 import sys
 import argparse
@@ -77,7 +78,7 @@ def get_sum_and_count(rbfs, ignore = set(), mutweights = {}):
 
 def get_sum_and_count2(t, rbfs,  sum_and_count_dict, ignore = set(), best_node = None):
     # node sum stored in first index and node count stored in second index of each dict entry
-    # sum_and_count_dict = {}
+    best_node_leaves = []
     leaf_count = 0
     for node in rbfs:
         if (best_node != None) and (node.id == best_node.id):  # must subtract from all ancestors and 0 out all descendants.
@@ -91,10 +92,11 @@ def get_sum_and_count2(t, rbfs,  sum_and_count_dict, ignore = set(), best_node =
                         sum_and_count_dict[n.id] = (newsum, newcount)
                 # can delete specific node and all descendants
                 sum_and_count_dict.pop(node.id)
-                descendants = t.breadth_first_expansion(node.id, True)  #grab all nodes that are a descendant of the indicated node
+                descendants = t.breadth_first_expansion(node.id, True) #grab all nodes that are a descendant of the indicated node
                 for child in descendants:
+                    if child.is_leaf():
+                        best_node_leaves.append(child.id)
                     if child.id in sum_and_count_dict: # and (child.is_leaf()):
-                        # if child.id_leaf():  #may not be correct, for testing
                         ignore.add(child.id)
                         sum_and_count_dict.pop(child.id)
             #can essentially delete all descendants and the specific node itself since its already part of a lineage and has been used
@@ -122,7 +124,7 @@ def get_sum_and_count2(t, rbfs,  sum_and_count_dict, ignore = set(), best_node =
                     #this logic applies as we move further up the tree.
                     sum_and_count_dict[node.id] = (total_sum + len(node.mutations) * total_count, total_count)
 
-    return sum_and_count_dict, leaf_count #, leaves
+    return sum_and_count_dict, leaf_count, best_node_leaves
 
 
 def evaluate_candidate(a, nid, pgp_d, sum_and_counts, dist_to_root):
@@ -138,8 +140,6 @@ def evaluate_candidate(a, nid, pgp_d, sum_and_counts, dist_to_root):
         return 0
     candidate_to_parent = dist_to_root[nid] - dist_to_root[a] 
     mean_distances = node_sum/node_count
-    # print("mean distance: ", mean_distances, " candidate to parent: ", candidate_to_parent) #candidate_value error with mean_distance = 1 and candidate_to_parent= -1
-
     #could avoiding the divide by 0 be creating the inconsistency in math between this and the original script?
     if (mean_distances == 0) and (candidate_to_parent == 0):   #avoid divide by 0
         candidate_value = 0
@@ -263,9 +263,9 @@ def main():
     # rbfs = t.breadth_first_expansion(t.root.id, True)
     # dist_root = dists_to_root(t, t.root)
     # scdict, leaf_count = get_sum_and_count(rbfs)
-    # print("Leaf_count: ", leaf_count)
     best_node = None
     scdict = {}
+    node_leaves = []
     while True:
         new_annotes = {}
         for ann,nid in outer_annotes.items():
@@ -274,22 +274,17 @@ def main():
             rbfs = t.breadth_first_expansion(nid, True) #takes the name
             dist_root = dists_to_root(t, t.get_node(nid)) #needs the node object, not just the name
             while True:
-                
-                # time1 = time.time()
                 # scdict, leaf_count = get_sum_and_count(rbfs, ignore = labeled, mutweights = mutweights)
-                scdict, leaf_count = get_sum_and_count2(t, rbfs, scdict, ignore = labeled, best_node = best_node)
-                # time2 = time.time()
-                # print("TIME ELAPSED BETWEEN sum_and_count call: ", time2 - time1)
+                scdict, leaf_count, node_leaves = get_sum_and_count2(t, rbfs, scdict, ignore = labeled, best_node = best_node)
                 best_score, best_node = evaluate_lineage(t, dist_root, nid, rbfs, scdict, floor = args.floor, maxpath = args.maxpath, mutweights = mutweights)
                 if best_score <= 0:
                     break
                 new_annotes[ann + "." + str(serial)] = best_node.id
                 if args.dump != None:
                     print("{}\t{}\t{}\t{}\t{}".format(ann,nid,ann + "." + str(serial),best_node.id,str(best_score+args.floor)),file=dumpf)
-
-                for l in t.get_leaves_ids(best_node.id):   # change this
-                    labeled.add(l)
-                
+                if node_leaves != []:
+                    for l in node_leaves: # t.get_leaves_ids(best_node.id):   # change this
+                        labeled.add(l)
                 if len(labeled) >= leaf_count:
                     break
                 serial += 1
@@ -331,7 +326,7 @@ def main():
                     print("{}\t{}".format(k,v),file=f)
 
 if __name__ == "__main__":
-    # time1 = time.time()
+    time1 = time.time()
     main()
-    # time2 = time.time()
-    # print("TIME ELAPSED: ", time2-time1)
+    time2 = time.time()
+    print("TIME ELAPSED: ", time2-time1)
